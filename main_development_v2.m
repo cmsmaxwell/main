@@ -1,5 +1,4 @@
 clear; close all; clc;
-%% Release actions according to the states
 %% To develop boundaries in order to keep the car always in the central lane
 
 TVL=22;                 % Desired Velocity (m/s)
@@ -23,10 +22,8 @@ hcount=0;
 [DATA,leng]=Simulation_treatment(safezone,TVL);
 
 %% Main Algorithm
-crtb=zero_critic(stnu+1);                                   % Plus two desired actions
+crtb=zero_critic(stnu+1);
 actb=zero_actor(stnu);                                      % Create the 0 actor and critic 
-
-% Minibatch = Select_data(DATA,actb,crtb,gamma,minipcent);  % Select the data and calculates the Q value 
 
 fprintf('--->->Minibatch done!\n')
 fprintf('...Calculating Actor\n...Calculating Critic\n...Finding Best actions\n')
@@ -102,66 +99,41 @@ save ('act_mean.mat','actb');
 %% Actor Functions
                                             
 function net = zero_actor(n)
-
-%Create a actor network with 2 hidden layers with 12 nodes each, and the
-% desired number of inputs. Hidden layers with ReLu and output layer
-% sigmoid.
-%Reset all weights and bias of the actor network to zero.
-
-
 net=feedforwardnet([30 30]);                % Create the network with 2 hidden layers with 12 nodes each
 net.numInputs = n;                          % Define the number of the inputs {dsx_ol...dvx_ol,GP,brake} 14
-%net.numInputs
 for i=2:n
     net.inputConnect(1,i) = true;           % Connect all inputs with the first layer
 end
 net.trainParam.showWindow = 0;              % Turn off the learning pop up as long this learnig is not important
-%net.trainParam.showCommandLine=true;
 net.trainParam.epochs = 1;                  % Use just one pass through network as long this learnig is not important
 for i=1:n
     in{i,1}=randn(1,3);                     % Create a random input cell array {number of input x 1}
 end
 out = randn(1,3);                           % Create a random output ############
-
 net.inputs{1}.processFcns = {}; 
 net.outputs{2}.processFcns = {};
 net.outputs{3}.processFcns = {};
-
-% net.layers{1}.transferFcn = 'poslin';     % Change the activation function to ReLu in the hidden layers
-% net.layers{2}.transferFcn = 'poslin'; 
-% net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
-
 fprintf('...Actor weights are reseted\n')
 net = train(net,in,out);                    % Train to create the array with correct positions of the weights
 m = length(getwb(net));                     % Find the number of weights in the 
 net = setwb(net,zeros(m,1));                % Insert zeros in all weights and bias
-
 end
+
 function net = create_actor(Minibatch,crt)
 
 actst = cell2mat(Minibatch{1,1});               % Take action and states vector 
 [~,n] = size(actst);                            % Find the number of samples
 in = (crt.numInputs - 1);                       % Find the number of inputs 
-%fprintf('\nNumber of inputs Actor')
-%in
-%fprintf(1,'Calculating the best action');
-
-% actst = cell2mat(Minibatch{1,1});             % Take action and states vector 
-% n = length(actst(1,1));                       % Find the number of samples
-% in = (crt.numInputs - 1);                     % Find the number of inputs 
-
 Q=zeros(27,n);
 action=zeros(1,n);
-    
 max1=0;     %Value for minimum action
-max2=42;    %Value for maximum action (42m/s = 
+max2=42;    %Value for maximum action (42m/s) 
 zeroone = linspace(max1,max2,27);
 acttest = ones(27,n);
 for k = 1:27
     acttest(k,:) = zeroone(k).*ones(1,n);
 end
-
-for j=1:2 %POR QUE TEM ESSE J AQUI?
+for j=1:2
     for k = 1:27 % find the Q value for all of the input actions
         if in == 13
             Q(k,:)=crt([acttest(k,:);actst(2,:);actst(3,:);actst(4,:);actst(5,:);actst(6,:);actst(7,:);actst(8,:);actst(9,:);actst(10,:);actst(11,:);actst(12,:);actst(13,:);actst(14,:)]);
@@ -175,72 +147,32 @@ for j=1:2 %POR QUE TEM ESSE J AQUI?
         max2(k) = acttest(ind2(k),k);
         acttest(:,k)= linspace(max1(k),max2(k),27)'; 
     end
-    
 end
 
 net=feedforwardnet([30 30]);                % Create the network with 2 hidden layers with 30 nodes each
 net.numInputs = in;                         % Define the number of the inputs {ax;i;GP;vx;vw}
-%fprintf('\nNumber of inputs Actor')
-%in
 for i=2:in
     net.inputConnect(1,i) = true;           % Connect all inputs with the first layer
 end
-
-% Need to remove the process Functions as long as the inputs and outputs
-% are by standart treated by the function mapinmax and the used data was
-% already treated an normalized 
-
-%      Function      |                    Algorithm
-%--------------------------------------------------------------------------
-%      mapminmax     | Normalize inputs/targets to fall in the range [?1, 1]
-%       mapstd       | Normalize inputs/targets to have zero mean and unity variance
-%     processpca     | Extract principal components from the input vector
-%     fixunknowns    | Process unknown inputs
-% removeconstantrows | Remove inputs/targets that are constant
-
 net.inputs{1}.processFcns = {}; 
 net.outputs{2}.processFcns = {};
-net.outputs{3}.processFcns = {};
-
-% net.layers{1}.transferFcn = 'poslin';     % Change the activation function to ReLu in the hidden layers
-% net.layers{2}.transferFcn = 'poslin'; 
-% net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
-                                            % as long as just values between 0 and 1 are waited to the output
-%net.trainFcn='trainlm';     
+net.outputs{3}.processFcns = {};  
 net.trainParam.max_fail = 20;               %Maximum validation failures
 net.trainParam.min_grad = 1e-7;             %Minimum performance gradient
-% net.trainParam.mu	0.001                   %Initial mu
-% net.trainParam.mu_dec	0.1                 %mu decrease factor
-% net.trainParam.mu_inc	10                  %mu increase factor
 net.trainParam.mu_max = 1e10;               %Maximum mu
-% net.trainParam.show	25                  %Epochs between displays (NaN for no displays)
 net.trainParam.showWindow = 0;              %Turn off the learning pop up as long this learnig is not important
-% net.trainParam.showCommandLine = true;	%Generate command-line output
 fprintf('...(Create_Actor) Actor training\n')
 net = train(net,Minibatch{3,1},max1);       % Train to create the array with correct positions of the weights
-
-%% Evaluation plot
-
-% x=linspace(0,length(action),length(action));
-% actionnet=net(Minibatch{3,1});
-% plot(x,action,x,cell2mat(actionnet));
-
 end
+
+
 function act = train_actor(Minibatch,crt,act)
 
 actst = cell2mat(Minibatch{1,1});  % Take action and states vector 
 n = length(actst);                 % Find the number of samples
 in = (crt.numInputs - 1);          % Find the number of inputs 
-
-%fprintf('...Calculating the best action(train actor)\n');
-
-% actst = cell2mat(Minibatch{1,1});  % Take action and states vector 
-% n = length(actst);                 % Find the number of samples
-% in = (crt.numInputs - 1);          % Find the number of inputs 
-
 Q=zeros(27,n);
-action=zeros(1,n);
-    
+action=zeros(1,n);  
 max1=0;     %Value for minimum action
 max2=42;    %Value for maximum action       
 zeroone = linspace(max1,max2,27);
@@ -249,7 +181,7 @@ for k = 1:27 %Total of desired actions, states and next states (without function
     acttest(k,:) = zeroone(k).*ones(1,n);
 end
 
-for j=1:2 %POR QUE TEM ESSE J AQUI?
+for j=1:2
     for k = 1:27 % find the Q value for all of the input actions
         if in == 13 %(6 distaces, 6 velocities, vv, gp and break)
             Q(k,:)=crt([acttest(k,:);actst(2,:);actst(3,:);actst(4,:);actst(5,:);actst(6,:);actst(7,:);actst(8,:);actst(9,:);actst(10,:);actst(11,:);actst(12,:);actst(13,:);actst(14,:)]);            
@@ -268,27 +200,11 @@ end
 fprintf('...(Train_Actor) Actor training\n')
 act= train(act,Minibatch{3,1},max1); % Train to create the array with correct positions of the weights
 
-%% Evaluation plot
-
-% x=linspace(0,length(action),length(action));
-% actionnet=net(Minibatch{3,1});
-% plot(x,action,x,cell2mat(actionnet));
-
 end
-
-
-
-
 
 %% Critic Functions
 
 function net = zero_critic(n)
-
-%Create a critic network with 2 hidden layers with 38 nodes each, and the
-% desired number of inputs. Hidden layers with ReLu and output layer
-% sigmoid.
-%Reset all weights and bias of the actor network to zero.
-
 
 net=feedforwardnet([38 38]);                % Create the network with 2 hidden layers with 38 nodes each
 net.numInputs = n;                          % Define the number of the inputs {ax;i;GP;vx;vw}
@@ -296,21 +212,14 @@ for i=2:n
     net.inputConnect(1,i) = true;           % Connect all inputs with the first layer
 end
 net.trainParam.showWindow = 0;              % Turn off the learning pop up as long this learnig is not important
-%net.trainParam.showCommandLine=true;
 net.trainParam.epochs = 1;               % Use just one pass through network as long this learnig is not important
 for i=1:n
     in{i,1}=randn(1,3);                     % Create a random input cell array {number of input x 1}
 end
 out = randn(1,3);                           % Create a random output ############
-
 net.inputs{1}.processFcns = {}; 
 net.outputs{2}.processFcns = {};
 net.outputs{3}.processFcns = {};
-
-% net.layers{1}.transferFcn = 'poslin';     % Change the activation function to ReLu in the hidden layers
-% net.layers{2}.transferFcn = 'poslin'; 
-% net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
-
 fprintf('...Critic weights are reseted\n')
 net = train(net,in,out);                    % Train to create the array with correct positions of the weights
 m = length(getwb(net));                     % Find the number of weights in the 
@@ -321,43 +230,18 @@ function net = create_critic(Minibatch,in)
 
 net=feedforwardnet([38 38]);            % Create the network with 2 hidden layers with 38 nodes each
 net.numInputs = in;                     % Define the number of the inputs {ax;i;GP;vx;vw}
-%fprintf('\nNumber of inputs Critic')
-%in
 for i=2:in
     net.inputConnect(1,i) = true;       % Connect all inputs with the first layer
 end
-
-% Need to remove the process Functions as long as the inputs and outputs
-% are by standart treated by the function mapinmax and the used data was
-% already treated an normalized 
-
-%      Function      |                    Algorithm
-%--------------------------------------------------------------------------
-%      mapminmax     | Normalize inputs/targets to fall in the range [?1, 1]
-%       mapstd       | Normalize inputs/targets to have zero mean and unity variance
-%     processpca     | Extract principal components from the input vector
-%     fixunknowns    | Process unknown inputs
-% removeconstantrows | Remove inputs/targets that are constant
-
 net.inputs{1}.processFcns = {}; 
 net.outputs{2}.processFcns = {};
-net.outputs{3}.processFcns = {};
-
-% net.layers{1}.transferFcn = 'poslin';  	% Change the activation function to ReLu in the hidden layers
-% net.layers{2}.transferFcn = 'poslin'; 
-% net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
-                                            % as long as just values between 0 and 1 are waited to the output
+net.outputs{3}.processFcns = {};                                          % as long as just values between 0 and 1 are waited to the output
 net.trainFcn='trainlm';   
 
 net.trainParam.max_fail = 20;               %Maximum validation failures
 net.trainParam.min_grad = 1e-7;             %Minimum performance gradient
-% net.trainParam.mu = 0.001;                %Initial mu
-% net.trainParam.mu_dec = 0.1;              %mu decrease factor
-% net.trainParam.mu_inc = 10;               %mu increase factor
 net.trainParam.mu_max = 1e10;               %Maximum mu
-% net.trainParam.show	25                  %Epochs between displays (NaN for no displays)
 net.trainParam.showWindow = 0;              %Turn off the learning pop up as long this learnig is not important
-% net.trainParam.showCommandLine = true;	%Generate command-line output
 
 %        Minibatch Array
 %|   {1,1}   | {2,1} | {3,1} |
@@ -373,23 +257,14 @@ crt = train(crt,Minibatch{1,1},Minibatch{2,1}); % Train to create the array with
 
 end
 
-
-
-
-
 %% Root Functions
 
 function Minibatch = Select_data(DATA,netin,act,crt,gamma,minicent)
-% function Minibatch = Select_data(DATA,act,crt,gamma,minicent)
-% netin=act.numInputs;
-
-% Select a minibatch from the total data and calculates the Q value
 
 [m,~]=size(DATA);           % take the DATA size
 minisize=round(m*minicent); % Minibatch size = minipcent % of the total DATA size
 idx = randperm(m,minisize); % create a random position vector
 rawbatch = DATA(idx,:);     % Take the desired data from DATA to Minibatch 
-
 rawbatch = rawbatch';
 
 % Create training data structure with vehicle speed
@@ -398,9 +273,6 @@ if netin==13 %States cosidered (6 distaces, 6 velocities, vv, gp and break)
     nextstate={rawbatch(17,:);rawbatch(18,:);rawbatch(19,:);rawbatch(20,:);rawbatch(21,:);rawbatch(22,:);rawbatch(23,:);rawbatch(24,:);rawbatch(25,:);rawbatch(26,:);rawbatch(27,:);rawbatch(28,:);rawbatch(29,:)};
     actionstate={rawbatch(1,:);rawbatch(2,:);rawbatch(3,:);rawbatch(4,:);rawbatch(5,:);rawbatch(6,:);rawbatch(7,:);rawbatch(8,:);rawbatch(9,:);rawbatch(10,:);rawbatch(11,:);rawbatch(12,:);rawbatch(13,:);rawbatch(14,:)};
     Qvalue= rawbatch(15,:);
-%     action=act(nextstate);
-%     critic = crt({action{1,1};rawbatch(19,:);rawbatch(20,:);rawbatch(21,:);rawbatch(22,:);rawbatch(23,:);rawbatch(24,:);rawbatch(25,:);rawbatch(26,:);rawbatch(27,:);rawbatch(28,:);rawbatch(29,:);rawbatch(30,:);rawbatch(31,:);rawbatch(32,:)});
-%     Qvalue= rawbatch(18,:);%+ gamma.*critic{1,1};
 else
     fprintf('\n### Wrong input value ###');
     brake
@@ -430,6 +302,7 @@ Minibatch={actionstate;Qvalue;state};
 %          ... |dvx_ol|dvx_of|dvx_ll|dvx_lf|dvx_rl|dvx_rf| VVL  |
 %              |next  |next  |next  |next  |next  |next  |next  |
 end
+
 function [DATA,leng]=Simulation_treatment(safezone,TVL)
 
 load('simul_inicial_treated.mat');
@@ -602,35 +475,4 @@ if deltaV==0
 else
     TTC=X./deltaV; %deltaV is the relative velocity between VUT and leading vehicle.
 end
-end
-
-
-function plot_convergence (Qa,Qb,actaa,actbb,hv,acterror);
-
-figure (1);
-subplot(2,2,1)
-plot(Qb,'b');
-hold on
-subplot(2,2,1)
-plot(Qa,'r');
-legend('Updated','Calculated');
-ylabel('Q-value');
-xlabel('Amount of data');
-hold off
-
-subplot(2,2,2)
-plot(actbb,'b');
-hold on
-subplot(2,2,2)
-plot(actaa ,'r');
-legend('Updated','Calculated');
-ylabel('Action');
-xlabel('Amount of data');
-hold off
-
-subplot(2,2,[3,4]);
-plot(hv,acterror,'-o');  %Plot Q error convergence
-xlabel('Training cycle');
-ylabel('Action error');
-
 end
