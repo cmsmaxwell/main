@@ -1,53 +1,54 @@
 clear; close all; clc;
+tic
 %% Release actions according to the states
 
-%% Raw data processing
-data_processing_v4_4inputs();
+%% OFFLINE FIRST RUN << << <<
+
+%Run the Simulink Flowframe Simulation
+fprintf('//INITIALIZING// Simulink OnlineTry_R2019a_NO_AEB\n');
+model = 'OnlineTry_R2019a_NO_AEB';
+load_system(model);
+simOut = sim(model);
+fprintf('//DONE// Simulink OnlineTry_R2019a_NO_AEB\n');
+
+data_processing_simul_NO_AEB(); %It processes and creates the simul_NO_AEB_treated.mat
+fprintf('\n//DONE// Function data_processing_simul_NO_AEB\n\n');
 
 %% To develop boundaries in order to keep the car always in the central lane
-TargetVelocity=22;      % Desired Velocity (m/s)
-%dsafezone=2;           % Safety zone ahead of the VUT with the witdh of the lane
-%IMPROVE HERE #^^#      %In the future, implement some technique like circles
+TargetVelocity=27.7777; % Desired Velocity (>> m/s <<)
 
 %Hyper--Parameters
 stnu = 4;               % number of states 
 tau = 1;                % Target update
 gamma = 0.9;            % discount factor
-minipcent= 0.5;         % Minibatch size
+minipcent= 1;         % Minibatch size
 
 % Convengence parameter
-hmin = 2;              % number of training cycles
-acte = 0.001;           % Max squared error between to consecutives Q evaluations
+hmin = 25;              % number of training cycles
+acte = 0.0001;           % Max squared error between to consecutives Q evaluations
 acterror = acte;
 hmax = 50;
 hcount=0;
 
-chosen=1;
-
-%Run the Simulink Flowframe Simulation
-model = 'OnlineTry_R2019a';
-load_system(model);
-simOut = sim(model);
-%simCount=1;
+simCount=1;             %In the first Run, simCount=1, to use the simul_NO_AEB_treated.mat
 
 %% Data treatment 
-[DATA,leng]=Simulation_treatment(TargetVelocity,stnu);
-simOut = sim(model);
+[DATA,leng]=Simulation_treatment(TargetVelocity,stnu,simCount);
+%simOut = sim(model);
 
 %% Main Algorithm
+fprintf('\n//CREATION OF THE NETWORKS// Actor and Critic\n\n');
 crtb=zero_critic(stnu+1);                                   % Plus two desired actions
 actb=zero_actor(stnu);                                      % Create the 0 actor and critic 
 
 % Minibatch = Select_data(DATA,actb,crtb,gamma,minipcent);  % Select the data and calculates the Q value 
 
-fprintf('->->->Minibatch done!\n')
-fprintf('...Calculating Actor\n...Calculating Critic\n...Finding Best actions\n')
-
 Minibatch = Select_data(DATA,stnu,actb,crtb,gamma,minipcent);%Select the data and calculates the Q value 
+fprintf('->->->Minibatch done!\n');
 crta = create_critic(Minibatch,stnu+1);                     % Create and train the critic network
-fprintf('->->->Critic Network Creation done!\n')
+fprintf('->->->Critic Network Creation done!\n');
 acta = create_actor(Minibatch,crta);                        % Choose the best action, create and train the actor
-fprintf('->->->Actor Network Creation done!\n')
+fprintf('->->->Actor Network Creation done!\n');
 
 save('act.mat','acta');
 
@@ -69,6 +70,8 @@ acterror(hcount+1)=s/n;
 hv(hcount+1)=hcount;            % Create a vector of the h times that the cicle are tried
 hcount=hcount+1;                % Increase the counter
 plot_convergence (Qa,Qb,actaa,actbb,hv,acterror);
+
+fprintf('\n//FIRST TRAINING NO AEB// Actor, Critic and Best actions\n\n');
 
 while and(or(acterror(hcount)>=acte, hcount<=hmin),hcount<=hmax)
     
@@ -97,20 +100,170 @@ while and(or(acterror(hcount)>=acte, hcount<=hmin),hcount<=hmax)
 
 end
 
-fprintf('\nAction converged \n')
+fprintf(['\nAction converged after %d epochs\n'],hmin);
 
 save ('act.mat','actb');
-%count_reward = sum((DATA(end-(2*leng-1):end,7))<=0.1);
+count_reward = sum((DATA(leng:end,6))<=0.1);
 save('act_count.mat','actb');
-%mean_reward=mean(DATA(end-(2*leng-1):end,7));
+mean_reward=mean(DATA(leng:end,6));
 save ('act_mean.mat','actb');
-%reward_error = 0;
+reward_error = 0;
 
+
+%% ONLINE RUN << << << <<
+%data_processing_v4_4inputs();
+
+%Run the Simulink Flowframe Simulation
+fprintf('\n//INITIALIZING// Simulink OnlineTry_R2019a_WITH_AEB');
+model = 'OnlineTry_R2019a_WITH_AEB';
+load_system(model);
+simCount=1;
+simmin=5;      %Number of loops until reach the less than the reward_error
+
+while and(reward_error<=0.1,simCount<simmin) 
+    %% Run simulink simulation to update the data
+    simCount=simCount+1; % update counter of the update
+    
+    %Run simulation
+    simOut = sim(model);
+    fprintf('\n//DONE// Simulink OnlineTry_R2019a_WITH_AEB\n');
+    
+    TargetVelocity=27.7777; % Desired Velocity (>> m/s <<)
+    data_processing_simul_WITH_AEB();
+    fprintf('\n//DONE// Function data_processing_simul_WITH_AEB\n\n');
+    
+    [DATA,leng]=Simulation_treatment(TargetVelocity,stnu,simCount); %Update the Data
+    
+    %% Main Algorithm
+    
+    hcount = 1;
+    acterror=0;
+    acterror(hcount)=1;
+    hv=0;
+    hcount2=1;
+    
+    fprintf('\n//RE-TRAINING WITH AEB// Actor, Critic and Best actions\n\n');
+
+    while and(or(acterror(hcount)>=acte, hcount<=hmin),hcount<=hmax)
+        
+        Minibatch = Select_data(DATA,stnu,actb,crtb,gamma,minipcent);%Select the data and calculates the Q value 
+        crta = train_critic(Minibatch,crta); % Train the critic network
+        acta = train_actor(Minibatch,crta,acta); % Choose the best action and train the actor
+        actb = target_update(actb,acta,tau); % Update the weights of the actor network
+        crtb = target_update(crtb,crta,tau); % Update the weights of the critic network
+        
+        if stnu == 4
+            actbb = actb([DATA(:,2)';DATA(:,3)';DATA(:,4)';DATA(:,5)']);
+            Qb = crtb([actbb;DATA(:,2)';DATA(:,3)';DATA(:,4)';DATA(:,5)']);
+            actaa = acta([DATA(:,2)';DATA(:,3)';DATA(:,4)';DATA(:,5)']);
+            Qa = crta([actaa;DATA(:,2)';DATA(:,3)';DATA(:,4)';DATA(:,5)']);    
+        else
+            fprintf('some value has been inputed wrongly');
+        end
+        
+        if hcount2==1
+            hcount= 1;
+        elseif hcount2==2
+            hcount=hcount+1;  %Increase the counter
+        end
+        
+        error = gsubtract(actaa,actbb); % Calculate difference between Q
+        [s,n] = sumsqr(error);
+        acterror(hcount)=s/n;
+        hv(hcount)=hcount;  % Create a vector of the h times that the cicle are tried
+        
+        %plot_convergence (Qa,Qb,actaa,actbb,hv,acterror);
+        hcount2=2;
+        
+    end
+
+    save('act.mat','actb');
+    fprintf(['\nAction converged after %d epochs\n'],hmin);
+    
+    %% Run the simulation to evaluate the behavior of the AEB DEEP RL Network
+    
+    fprintf('\n//Evaluating AEB DEEP RL Network//\n\n');
+    
+    %Run simulation
+    simOut = sim(model);
+    
+    TargetVelocity=27.7777; % Desired Velocity (>> m/s <<)
+    DATA2 = Simulation_treatment2(TargetVelocity,stnu,simCount); % Update the data 
+            
+    reward_error_vect(simCount-1) = min(DATA2(:,6));
+    reward_error = min(DATA2(:,6));
+    if reward_error>0.1
+        save('act_error.mat','actb');
+        fprintf('\nActor update by number of bad rewards = 0\n');
+    end
+    % Update the saved actor if the mean of rewards is bigger then the old one    
+    mean_reward_new = mean(DATA2(:,6));
+    mean_rew_vect(simCount-1)=mean_reward_new;
+    if mean_reward_new>mean_reward
+        mean_reward=mean_reward_new;
+        save ('act_mean.mat','actb');
+        fprintf('\nActor update by the mean\n');
+    end
+    
+    % Update the saved actor if the number of bad rewards is small then the old one
+    count_rew_vect(simCount-1)=sum((DATA2(:,6))<=0.1);
+    if count_reward > sum((DATA2(:,6))<=0.1)
+        count_reward = sum((DATA2(:,6))<=0.1)
+        save('act_count.mat','actb');
+        fprintf('\nActor update by number of bad rewards\n');
+    end
+    
+    reward_plot=figure(3);
+    subplot(2,1,1)
+    plot(reward_error_vect,'-o')
+    hold on
+    plot(mean_rew_vect,'-o')
+    legend('Minimum reward','Medium reward')
+    hold off
+    
+    subplot(2,1,2)
+    plot(count_rew_vect,'-o')
+    
+%%                     DATA2 matrix
+
+%|(:,1) |(:,2) |(:,3) |(:,4) |(:,5) |(:,6) |(:,7) |(:,8) ||(:,9)|(:,10)|(:,11)|
+%|Des.  | dr_ol| vr_ol|v_vut |Pedal |REWARD| TTC  | dr_ol| vr_ol| v_vut| Pedal|
+%|Pedal |      |      |      |      |      |      | next | next | next | next |
+end
+
+reward=[reward_error_vect;mean_rew_vect;count_rew_vect];
+save ('rewards.mat','reward');
+final_time=toc;
+saveas(reward_plot,'Reward Plot.png');
+
+fprintf(['\n\nSUMMARY\nNumber of interactions = %d\n',...
+         'Time to simulation = %d minutes\n',...
+         'Total used data = %d\n',...
+         'Number of states = %d\n',...
+         'Target Update in the Network update = %f\n',...
+         'Discount factor of Q-value = %f\n',...
+         'Minibatch size = %d per cent \n',...
+         'Maximum mean reward = %f \n' ],simCount,round(final_time/60),length(DATA(:,1)),stnu,round(tau,2),round(gamma,2),minipcent*100,mean_reward);
+     
 %%
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 %% Actor Functions
-                                            
+
 function net = zero_actor(n)
 
 %Create a actor network with 2 hidden layers with 12 nodes each, and the
@@ -141,7 +294,7 @@ net.outputs{3}.processFcns = {};
 % net.layers{2}.transferFcn = 'poslin'; 
 % net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
 
-fprintf('...Actor weights are reseted\n')
+fprintf('...Actor weights are reseted\n');
 net = train(net,in,out);                    % Train to create the array with correct positions of the weights
 m = length(getwb(net));                     % Find the number of weights in the 
 net = setwb(net,zeros(m,1));                % Insert zeros in all weights and bias
@@ -226,7 +379,7 @@ net.trainParam.mu_max = 1e10;               %Maximum mu
 % net.trainParam.show	25                  %Epochs between displays (NaN for no displays)
 net.trainParam.showWindow = 0;              %Turn off the learning pop up as long this learnig is not important
 % net.trainParam.showCommandLine = true;	%Generate command-line output
-fprintf('...(Create_Actor) Actor training\n')
+fprintf('...(Create_Actor) Actor training\n');
 net = train(net,Minibatch{3,1},max1);       % Train to create the array with correct positions of the weights
 
 % Evaluation plot
@@ -235,6 +388,8 @@ x=linspace(0,length(action),length(action));
 actionnet=net(Minibatch{3,1});
 subplot(3,2,[1,2]);
 plot(x,action,x,cell2mat(actionnet));
+ylabel('Best Action Taken');
+xlabel('Amount of data');
 end
 function act = train_actor(Minibatch,crt,act)
 
@@ -275,7 +430,7 @@ for j=1:2 %POR QUE TEM ESSE J AQUI?
     end
 end
 
-fprintf('...(Train_Actor) Actor training\n')
+fprintf('...(Train_Actor) Actor training\n');
 act= train(act,Minibatch{3,1},max1); % Train to create the array with correct positions of the weights
 
 % Evaluation plot
@@ -287,7 +442,6 @@ plot(x,action,x,cell2mat(actionnet));
 ylabel('Best Action Taken');
 xlabel('Amount of data');
 end
-
 
 %% Critic Functions
 
@@ -320,7 +474,7 @@ net.outputs{3}.processFcns = {};
 % net.layers{2}.transferFcn = 'poslin'; 
 % net.layers{3}.transferFcn = 'purelin';    % Change the activation function of the output layer to sigmoid 
 
-fprintf('...Critic weights are reseted\n')
+fprintf('...Critic weights are reseted\n');
 net = train(net,in,out);                    % Train to create the array with correct positions of the weights
 m = length(getwb(net));                     % Find the number of weights in the 
 net = setwb(net,zeros(m,1));                % Insert zeros in all weights and bias
@@ -372,16 +526,15 @@ net.trainParam.showWindow = 0;              %Turn off the learning pop up as lon
 %|   {1,1}   | {2,1} | {3,1} |
 %|actionstate| Qvalue| state |
 
-fprintf('...(Create_Critic) Critic training\n')
+fprintf('...(Create_Critic) Critic training\n');
 net = train(net,Minibatch{1,1},Minibatch{2,1}); % Train to create the array with correct positions of the weights
 end
 function crt = train_critic(Minibatch,crt)
 
-fprintf('...(Train_Critic) Critic training\n')
+fprintf('...(Train_Critic) Critic training\n');
 crt = train(crt,Minibatch{1,1},Minibatch{2,1}); % Train to create the array with correct positions of the weights
 
 end
-
 
 %% Root Functions
 
@@ -425,9 +578,14 @@ Minibatch={actionstate;Qvalue;state};
 %|Pedal |      |      |      |      |      |      | next | next | next | next |
 
 end
-function [DATA,leng]=Simulation_treatment(TargetVelocity,stnu)
+function [DATA,leng]=Simulation_treatment(TargetVelocity,stnu,simCount)
 
-load('simul_inicial_treated.mat');
+if simCount == 1
+    load('simul_NO_AEB_treated.mat');
+else
+    load('simul_WITH_AEB_treated.mat');
+end
+
 rawdata=stateaction.Data; 
 %|(:,1)Des.pedal(:,2)dr_ol(:,3)vr_ol(:,4)v_vut(:,5)Pedal
 
@@ -481,8 +639,8 @@ rawdata=calculate_reward(rawdata,TargetVelocity,stnu);
 
 % To Export Data Structure
 DATA=rawdata(1:leng,[1:5 10 11 6:9]);
-save ('DATA.mat','DATA');
-fprintf('DATA Updated. First Rewards Assigned!\n')
+save('DATA.mat','DATA');
+fprintf('DATA Updated. First Rewards Assigned!\n');
 
 %%                     DATA matrix
 
@@ -569,6 +727,74 @@ else
 end
 end
 
+function DATA2 = Simulation_treatment2(TargetVelocity,stnu,simCount)
+
+load('simul_WITH_AEB_treated.mat');
+
+rawdata=stateaction.Data; 
+%|(:,1)Des.pedal(:,2)dr_ol(:,3)vr_ol(:,4)v_vut(:,5)Pedal
+
+%% Maximum values 
+%It finds the maximun values in the rawdata matrix to normalize it after
+
+MaxDrx   = 0; %Radar range   (m)   #150
+MaxVrx   = 0; %Max. velocity (mph) #50
+
+[sizei,sizej]=size(rawdata);
+
+%Normalizes the values between 0 and 1 to improve the learning performance
+for j=1:sizej
+    if j==2 %Columns of distance values
+        MaxDrx=max(abs(rawdata(:,j))); %Save maximum range(m)
+        if (MaxDrx==0)
+            rawdata(:,j) = 0;
+        else
+            rawdata(:,j) = rawdata(:,j)./MaxDrx;
+        end
+    elseif and(j>=3,j<=4)%Columns of velocity values
+        MaxVrx=max(abs(rawdata(:,j))); %Save maximum velocity(mph)
+        if (MaxVrx==0)
+            rawdata(:,j) = 0;
+        else
+            rawdata(:,j) = rawdata(:,j)./MaxVrx;
+        end
+    end
+end
+
+%% Data treatment
+%Normalizes the values between 0 and 1 to improve the learning performance
+
+% for i=1:sizej
+%     if and(i>=2,i<=4)%Columns of distance values
+%         rawdata(:,i) = rawdata(:,i)./MaxDrx;
+%     elseif and(i>=5,i<=8)%Columns of velocity values
+%         rawdata(:,i) = rawdata(:,i)./MaxVrx;
+%     end
+% end
+
+leng = length(rawdata(:,1))-1;
+
+rawdata=calculate_reward(rawdata,TargetVelocity,stnu);
+
+%%                     rawdata matrix
+
+%|(:,1) |(:,2) |(:,3) |(:,4) |(:,5) |(:,6) |(:,7) |(:,8) ||(:,9)|(:,10)|(:,11)|
+%|Des.  | dr_ol| vr_ol|v_vut | TTC  | dr_ol| vr_ol| v_vut| Pedal|REWARD| TTC  |
+%|Pedal |      |      |      |      | next | next | next | next |REWARD| TTC  |
+
+% To Export Data Structure
+DATA2=rawdata(1:leng,[1:5 10 11 6:9]);
+save('DATA2.mat','DATA2');
+fprintf('DATA2 Updated. First Rewards Assigned!\n');
+
+%%                     DATA2 matrix
+
+%|(:,1) |(:,2) |(:,3) |(:,4) |(:,5) |(:,6) |(:,7) |(:,8) ||(:,9)|(:,10)|(:,11)|
+%|Des.  | dr_ol| vr_ol|v_vut |Pedal |REWARD| TTC  | dr_ol| vr_ol| v_vut| Pedal|
+%|Pedal |      |      |      |      |      |      | next | next | next | next |
+end
+
+%% Plot Functions
 
 function plot_convergence (Qa,Qb,actaa,actbb,hv,acterror);
 
