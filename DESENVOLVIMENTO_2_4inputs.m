@@ -324,7 +324,7 @@ for k = 1:21
     acttest(k,:) = zeroone(k).*ones(1,n);
 end
 
-for j=1:2 %POR QUE TEM ESSE J AQUI?
+for j=1:2
     for k = 1:21 % find the Q value for all of the input actions
         if in == 4
             Q(k,:)=crt([acttest(k,:);actst(2,:);actst(3,:);actst(4,:);actst(5,:)]);
@@ -414,7 +414,7 @@ for k = 1:21 %Total of desired actions, states and next states (without function
     acttest(k,:) = zeroone(k).*ones(1,n);
 end
 
-for j=1:2 %POR QUE TEM ESSE J AQUI?
+for j=1:2
     for k = 1:21 % find the Q value for all of the input actions
         if in == 4 %(6 distaces, 6 velocities, vv, pedals)
             Q(k,:)=crt([acttest(k,:);actst(2,:);actst(3,:);actst(4,:);actst(5,:)]);            
@@ -464,7 +464,7 @@ net.trainParam.epochs = 1;                  % Use just one pass through network 
 for i=1:n
     in{i,1}=randn(1,3);                     % Create a random input cell array {number of input x 1}
 end
-out = randn(1,3);                           % Create a random output ############
+out = randn(1,3);                           % Create a random output #
 
 net.inputs{1}.processFcns = {}; 
 net.outputs{2}.processFcns = {};
