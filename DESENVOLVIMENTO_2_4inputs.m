@@ -21,7 +21,7 @@ TargetVelocity=27.7777; % Desired Velocity (>> m/s <<)
 stnu = 4;               % number of states 
 tau = 1;                % Target update
 gamma = 0.9;            % discount factor
-minipcent= 1;         % Minibatch size
+minipcent= 0.5;         % Minibatch size
 
 % Convengence parameter
 hmin = 25;              % number of training cycles
@@ -452,9 +452,8 @@ function net = zero_critic(n)
 % sigmoid.
 %Reset all weights and bias of the actor network to zero.
 
-
 net=feedforwardnet([38 38]);                % Create the network with 2 hidden layers with 38 nodes each
-net.numInputs = n;                          % Define the number of the inputs {ax;i;GP;vx;vw}
+net.numInputs = n;                          % Define the number of the inputs
 for i=2:n
     net.inputConnect(1,i) = true;           % Connect all inputs with the first layer
 end
@@ -483,7 +482,7 @@ end
 function net = create_critic(Minibatch,in)
 
 net=feedforwardnet([38 38]);            % Create the network with 2 hidden layers with 38 nodes each
-net.numInputs = in;                     % Define the number of the inputs {ax;i;GP;vx;vw}
+net.numInputs = in;                     % Define the number of the inputs
 %fprintf('\nNumber of inputs Critic')
 %in
 for i=2:in
@@ -666,7 +665,7 @@ rawdata(:,10)=ones(); %future rewards(10) -> (06)
 rawdata(:,11)=ones(); %future TTC    (11) -> (07)
 [sizei,sizej]=size(rawdata);
 
-%% #### Reward THIS IS THE BIGGEST CHALLENGE HERE!!! #### %%
+%% #### Reward #### %%
 
 %% TTC-based Reward ('Time To Collision' against leading car) and TTS-Based Reward ('Time To Stop' VUT)
 RewardDelT=0;
@@ -721,7 +720,7 @@ end
 function TTC       = time_to_collision(deltaX,deltaV,safe)  %It's considering only the same lane (scalar finction)
 X=minus(deltaX,safe); %deltaX is the distance between VUT and leading vehicle.
 if deltaV==0
-    TTC=0;              %IMPROVE HERE ##### When deltaV==0 ... TTC->Inf
+    TTC=0;
 else
     TTC=X./deltaV; %deltaV is the relative velocity between VUT and leading vehicle.
 end
